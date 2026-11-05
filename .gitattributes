@@ -53,6 +53,7 @@
 *.py    text diff=python
 *.md    text
 *.csv   text
+*.bat   text eol=crlf
 
 # MATLAB binaries (usually small, so plain binary, not LFS)
 *.mat   binary

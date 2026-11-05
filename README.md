@@ -57,6 +57,16 @@ cd "MAE 156 - Running Blades"
 
 SolidWorks files (`.SLDPRT`, `.SLDASM`, `.SLDDRW`, templates) are *lockable*. They check out **read-only** until you lock them, so two people can't edit the same file at once (git can't merge them).
 
+**Easy way: double-click `tools/CAD Checkout.bat`** (needs Python 3.8+). It lists every SolidWorks file with its lock owner, your changes, and whether it's open in SolidWorks:
+
+1. Select file(s) → **Start editing** (locks them and pulls the latest version)
+2. Edit in SolidWorks, **save and close**
+3. Select the same file(s) → **Done editing...** → type what you changed (commits, pushes and unlocks)
+
+**Discard my changes** reverts and unlocks. Double-click a row to open it in SolidWorks. The tool won't check in a file that's still open in SolidWorks.
+
+Command-line equivalent:
+
 ```bash
 git pull                                    # 1. get the latest
 git lfs lock cad/parts/blade.SLDPRT         # 2. claim it (makes it writable)
