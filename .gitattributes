@@ -55,6 +55,9 @@
 *.csv   text
 *.bat   text eol=crlf
 
+# CAD Checkout's logo/icon: plain git, so the tool looks right even before LFS is set up
+tools/assets/*  binary !filter
+
 # MATLAB binaries (usually small, so plain binary, not LFS)
 *.mat   binary
 *.fig   binary

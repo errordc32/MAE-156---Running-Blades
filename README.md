@@ -62,17 +62,20 @@ Git can't merge two people's changes to a SolidWorks file, so SolidWorks files (
 
 ### CAD Checkout (recommended)
 
-Double-click **`tools/CAD Checkout.bat`**. It lists every SolidWorks file with who has it locked, whether you've changed it, and whether it's open in SolidWorks (yours in green, others in red).
+Double-click **`tools/CAD Checkout.bat`**. It lists every SolidWorks file with who has it locked, whether you've changed it, and whether it's open in SolidWorks. Your locked files show in orange, and files a teammate has locked are greyed out.
 
-1. Select file(s) → **Start editing**. This locks them and pulls the latest version.
+1. **Double-click** a file. This locks it, pulls the latest version and opens it in SolidWorks, ready to edit. (To lock several at once, select them and click **Start editing**.)
 2. Edit in SolidWorks, then **save and close**.
-3. Select the same file(s) → **Done editing...** → type what you changed. This commits, pushes and unlocks.
+3. Select the same file(s) → **Done editing** → type what you changed. This commits, pushes and unlocks.
+
+Double-clicking a file someone else has locked offers to open it read-only instead.
 
 | Button | What it does |
 |---|---|
-| **Discard my changes** | Reverts your edits (after confirming) and unlocks |
-| **Open in SolidWorks** | Opens the file (or double-click a row) |
-| **Refresh** | Updates lock status (also happens every 60 s) |
+| **Start editing** | Locks the selected files and pulls the latest version, without opening them |
+| **Open read-only** | Opens in SolidWorks without locking, for just looking |
+| **Discard changes** | Reverts your edits (after confirming) and unlocks |
+| **Refresh** | Updates lock status. A full refresh happens every 60 s, and a quick one whenever you switch back to the window |
 
 It won't check in a file that's still open in SolidWorks, and won't let you start editing a file someone else has locked.
 
