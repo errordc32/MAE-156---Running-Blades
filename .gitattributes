@@ -1,2 +1,61 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Patterns use [xX] brackets so they match both cases: SolidWorks writes
+# .SLDPRT in capitals, but exports and renamed files are often lowercase.
+
+# ---------------------------------------------------------------------------
+# SolidWorks native files: Git LFS + LOCKABLE
+# These check out READ-ONLY. Run `git lfs lock <file>` before editing,
+# and `git lfs unlock <file>` after you push. See README "Working with SolidWorks".
+# ---------------------------------------------------------------------------
+*.[sS][lL][dD][pP][rR][tT]  filter=lfs diff=lfs merge=lfs -text lockable
+*.[sS][lL][dD][aA][sS][mM]  filter=lfs diff=lfs merge=lfs -text lockable
+*.[sS][lL][dD][dD][rR][wW]  filter=lfs diff=lfs merge=lfs -text lockable
+# Templates and sheet formats
+*.[pP][rR][tT][dD][oO][tT]  filter=lfs diff=lfs merge=lfs -text lockable
+*.[aA][sS][mM][dD][oO][tT]  filter=lfs diff=lfs merge=lfs -text lockable
+*.[dD][rR][wW][dD][oO][tT]  filter=lfs diff=lfs merge=lfs -text lockable
+*.[sS][lL][dD][dD][rR][tT]  filter=lfs diff=lfs merge=lfs -text lockable
+
+# SolidWorks material libraries are XML text: normal git, diffable
+*.[sS][lL][dD][mM][aA][tT]  text
+
+# ---------------------------------------------------------------------------
+# Neutral CAD / mesh exports: Git LFS (not lockable, they're regenerated)
+# ---------------------------------------------------------------------------
+*.[sS][tT][eE][pP]  filter=lfs diff=lfs merge=lfs -text
+*.[sS][tT][pP]      filter=lfs diff=lfs merge=lfs -text
+*.[iI][gG][eE][sS]  filter=lfs diff=lfs merge=lfs -text
+*.[iI][gG][sS]      filter=lfs diff=lfs merge=lfs -text
+*.[sS][tT][lL]      filter=lfs diff=lfs merge=lfs -text
+*.3[mM][fF]         filter=lfs diff=lfs merge=lfs -text
+*.[dD][wW][gG]      filter=lfs diff=lfs merge=lfs -text
+*.[dD][xX][fF]      filter=lfs diff=lfs merge=lfs -text
+
+# ---------------------------------------------------------------------------
+# Documents and media: Git LFS
+# ---------------------------------------------------------------------------
+*.[pP][dD][fF]      filter=lfs diff=lfs merge=lfs -text
+*.[dD][oO][cC][xX]  filter=lfs diff=lfs merge=lfs -text
+*.[xX][lL][sS][xX]  filter=lfs diff=lfs merge=lfs -text
+*.[pP][pP][tT][xX]  filter=lfs diff=lfs merge=lfs -text
+*.[pP][nN][gG]      filter=lfs diff=lfs merge=lfs -text
+*.[jJ][pP][gG]      filter=lfs diff=lfs merge=lfs -text
+*.[jJ][pP][eE][gG]  filter=lfs diff=lfs merge=lfs -text
+*.[mM][pP]4         filter=lfs diff=lfs merge=lfs -text
+*.[mM][oO][vV]      filter=lfs diff=lfs merge=lfs -text
+
+# ---------------------------------------------------------------------------
+# Scripts and data: normal git
+# ---------------------------------------------------------------------------
+*.m     text diff=matlab
+*.py    text diff=python
+*.md    text
+*.csv   text
+
+# MATLAB binaries (usually small, so plain binary, not LFS)
+*.mat   binary
+*.fig   binary
+*.slx   binary
+*.mlx   binary

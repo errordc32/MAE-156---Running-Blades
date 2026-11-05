@@ -1,0 +1,59 @@
+# ---- OS ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Office / SolidWorks lock & temp files ----
+~$*
+*.tmp
+*.bak
+*.swp
+Backup of *
+
+# ---- SolidWorks Simulation results (large, regenerate by re-running the study) ----
+*.cwr
+*.CWR
+# Simulation scratch / restart files
+*.rstp
+*.gpa
+
+# ---- Fusion 360 / Inventor ----
+OldVersions/
+*.lck
+
+# ---- ANSYS ----
+*_files/dp0/*/MECH/*.rst
+*_files/user_files/
+*.lock
+
+# ---- Abaqus (only inside analysis/ so test data and other CAD formats aren't caught) ----
+analysis/**/*.odb
+analysis/**/*.msg
+analysis/**/*.sta
+analysis/**/*.res
+analysis/**/*.sim
+analysis/**/*.ipm
+analysis/**/*.rec
+analysis/**/*.lck
+analysis/**/*.log
+
+# ---- MATLAB ----
+*.asv
+*.mex*
+slprj/
+codegen/
+*.autosave
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# ---- Editors ----
+.vscode/
+.idea/
+
+# ---- Large media (store on shared drive instead) ----
+testing/data/**/raw-video/
