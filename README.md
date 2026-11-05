@@ -56,7 +56,7 @@ tools/              CAD Checkout (SolidWorks lock/check-in tool)
 
 ## Working with SolidWorks
 
-**SolidWorks version:** everyone must use the same version, including the service pack: `____`. Files saved in a newer version can never be opened in an older one.
+**SolidWorks version:** everyone must use the same version, including the service pack: `RX_2025`. Files saved in a newer version can never be opened in an older one.
 
 Git can't merge two people's changes to a SolidWorks file, so SolidWorks files (`.SLDPRT`, `.SLDASM`, `.SLDDRW`, templates) are **lockable**. They stay **read-only** until you lock them, and nobody else can push changes to a file you've locked.
 
