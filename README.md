@@ -70,10 +70,12 @@ Double-click **`tools/CAD Checkout.bat`**. It lists every SolidWorks file with w
 
 Double-clicking a file someone else has locked offers to open it read-only instead.
 
+Files are shown in their folders (`assemblies/` and `parts/` start expanded). Each folder row sums up the locks and changes inside it. **Selecting a folder selects everything in it**, so you can lock or check in a whole sub-assembly folder in one go. The exception is the top-level folders (`assemblies/`, `drawings/`, `exports/`, `parts/`): they can't be acted on as a whole, and the buttons grey out when one is selected.
+
 | Button | What it does |
 |---|---|
 | **Start editing** | Locks the selected files and pulls the latest version, without opening them |
-| **Open read-only** | Opens in SolidWorks without locking, for just looking |
+| **Open read-only** / **Open** | Opens in SolidWorks without locking. It shows as **Open**, with an orange outline, when the selected files are already locked by you, so they open editable |
 | **Discard changes** | Reverts your edits (after confirming) and unlocks |
 | **Refresh** | Updates lock status. A full refresh happens every 60 s, and a quick one whenever you switch back to the window |
 

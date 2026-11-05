@@ -31,6 +31,16 @@ from tkinter import messagebox, ttk
 
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # no console flashes on Windows
 AUTO_REFRESH_MS = 60_000
+BROWSE_ROOTS = ("cad",)  # folders shown even when they hold no SolidWorks files
+HIDDEN_ROOT = "cad"      # not drawn: its subfolders (assemblies, parts, ...) become top level
+OPEN_BY_DEFAULT = ("cad/assemblies", "cad/parts")
+HINT = "Double-click a file to lock it and open it in SolidWorks"
+
+
+def is_protected_dir(d):
+    """Top-level CAD folders (cad/parts, cad/assemblies, ...) can't be acted on as a
+    whole: that would lock/check in/discard half the project in one click."""
+    return d.startswith(HIDDEN_ROOT + "/") and d.count("/") == 1
 GIT_DOWNLOAD = "https://git-scm.com/download/win"
 
 
@@ -219,7 +229,40 @@ def load_state(repo, cached=None):
             "change": changes.get(path, ""),
             "open": os.path.exists(sw_lock_file(repo, path)),
         })
+
+    # Folders: every folder that holds a file, plus every folder on disk under
+    # BROWSE_ROOTS (so empty ones like cad/exports/ still show and can be browsed).
+    dirs = set()
+    for r in state["rows"]:
+        parts = r["path"].split("/")[:-1]
+        dirs.update("/".join(parts[:i]) for i in range(1, len(parts) + 1))
+    for top in BROWSE_ROOTS:
+        for cur, subdirs, _ in os.walk(os.path.join(repo, top)):
+            subdirs[:] = [d for d in subdirs if not d.startswith((".", "~"))]
+            dirs.add(os.path.relpath(cur, repo).replace(os.sep, "/"))
+    state["dirs"] = sorted(dirs, key=lambda d: (d.count("/"), d.lower()))
     return state
+
+
+def unpushed_paths(repo):
+    """Files changed by local commits that GitHub doesn't have yet."""
+    code, out, _ = git(repo, "log", "@{u}..HEAD", "--name-only", "--format=")
+    return {p for p in out.splitlines() if p.strip()} if code == 0 else set()
+
+
+def blocking_files(text):
+    """Pull/merge errors list the files that block it on tab-indented lines."""
+    return [line.strip() for line in text.splitlines() if line.startswith("\t")]
+
+
+def default_commit_message(files):
+    """'Edited blade.SLDPRT', 'Edited a.SLDPRT and b.SLDASM', 'Edited a.SLDPRT and 3 other files'."""
+    names = [os.path.basename(f) for f in files]
+    if len(names) == 1:
+        return "Edited " + names[0]
+    if len(names) == 2:
+        return "Edited %s and %s" % tuple(names)
+    return "Edited %s and %d other files" % (names[0], len(names) - 1)
 
 
 def lock_label(row):
@@ -269,6 +312,7 @@ def setup_style(root):
     style.configure("Stat.TLabel", background=BG, foreground=MUTED, font=(FONT, 9))
     style.configure("StatNum.TLabel", background=BG, foreground=TEXT, font=(FONT, 9, "bold"))
     style.configure("Warn.TLabel", background=BG, foreground=RED, font=(FONT, 9, "bold"))
+    style.configure("HintWarn.TLabel", background=BG, foreground=ORANGE, font=(FONT, 9, "bold"))
     style.configure("Section.TLabel", background=BG, foreground=MUTED, font=(FONT, 8, "bold"))
     style.configure("Empty.TLabel", background=SURFACE, foreground=MUTED, font=(FONT, 11),
                     justify="center")
@@ -302,6 +346,18 @@ def setup_style(root):
     button("Primary.TButton", ORANGE, BLACK, ORANGE_HOVER, ORANGE_DOWN, bold=True)
     button("TButton", RAISED, TEXT, "#303235", "#1f2022")
     button("Danger.TButton", RAISED, RED, "#3a2526", "#2a1c1d")
+
+    # "Open" for files you've locked: orange outline. clam draws the border as
+    # bordercolor + a 1px light/dark bevel, so colour all three orange for a 2px
+    # outline, and take 2px off the padding so the button doesn't change size.
+    style.configure("Outline.TButton", background=RAISED, foreground=ORANGE, borderwidth=1,
+                    relief="solid", padding=(14, 6), font=(FONT, 10),  # same font = same width
+                    bordercolor=ORANGE, lightcolor=ORANGE, darkcolor=ORANGE, focuscolor=RAISED)
+    style.map("Outline.TButton",
+              background=[("disabled", SURFACE), ("pressed", "#1f2022"), ("active", "#303235")],
+              foreground=[("disabled", "#55585c")],
+              bordercolor=[("disabled", BORDER)],
+              lightcolor=[("disabled", BORDER)], darkcolor=[("disabled", BORDER)])
     return style
 
 
@@ -319,6 +375,21 @@ def style_window(win):
                                                        ctypes.sizeof(v))
     except Exception:  # noqa: BLE001 - purely cosmetic
         pass
+
+
+def make_icons():
+    """Tiny folder and file icons drawn in code (16x16, no image files needed)."""
+    folder = tk.PhotoImage(width=16, height=16)
+    folder.put(MUTED, to=(1, 3, 7, 5))      # tab
+    folder.put(MUTED, to=(1, 5, 15, 14))    # back
+    folder.put("#c2c4c7", to=(1, 7, 15, 14))  # front
+    page = tk.PhotoImage(width=16, height=16)
+    page.put(MUTED, to=(3, 1, 13, 15))      # outline
+    page.put(SURFACE, to=(4, 2, 12, 14))    # paper
+    page.put(ORANGE, to=(5, 5, 11, 6))      # "text" lines in brand orange
+    page.put(MUTED, to=(5, 8, 11, 9))
+    page.put(MUTED, to=(5, 11, 9, 12))
+    return folder, page
 
 
 def load_image(name):
@@ -342,8 +413,8 @@ class App:
         self.repo_name = os.path.basename(repo)
 
         root.title("CAD Checkout")
-        root.geometry("980x640")
-        root.minsize(720, 460)
+        root.geometry("980x720")
+        root.minsize(720, 500)
         setup_style(root)
         style_window(root)
 
@@ -382,7 +453,7 @@ class App:
         inner.pack(fill="both", expand=True)
         cols = ("lock", "change", "sw")
         self.tree = ttk.Treeview(inner, columns=cols, selectmode="extended")
-        self.tree.heading("#0", text="  FILE", anchor="w")
+        self.tree.heading("#0", text="  NAME", anchor="w")
         self.tree.heading("lock", text="LOCK", anchor="w")
         self.tree.heading("change", text="YOUR CHANGES", anchor="w")
         self.tree.heading("sw", text="SOLIDWORKS", anchor="w")
@@ -393,18 +464,26 @@ class App:
         self.tree.tag_configure("you", foreground=ORANGE)
         self.tree.tag_configure("them", foreground=MUTED)  # someone else's: greyed out
         self.tree.tag_configure("free", foreground=TEXT)
+        self.tree.tag_configure("folder", foreground=TEXT, font=(FONT, 10, "bold"))
+        self.folder_icon, self.file_icon = make_icons()
+        self.open_dirs = set("dir:" + d for d in OPEN_BY_DEFAULT)  # remembered across refreshes
+        # Opening/closing sets focus to that folder first, so focus() is the folder
+        self.tree.bind("<<TreeviewOpen>>", lambda e: self.open_dirs.add(self.tree.focus()))
+        self.tree.bind("<<TreeviewClose>>",
+                       lambda e: self.open_dirs.discard(self.tree.focus()))
         scroll = ttk.Scrollbar(inner, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right", fill="y")
         self.tree.pack(side="left", fill="both", expand=True)
         self.tree.bind("<Double-1>", self.on_double_click)
+        self.tree.bind("<<TreeviewSelect>>", lambda e: self.update_buttons())
         self.empty = ttk.Label(inner, style="Empty.TLabel",
                                text="No SolidWorks files yet\n\nSave parts into cad/parts/ "
                                     "and they'll show up here")
 
         # ----- bottom section. Packed bottom-up *before* the table so that when the
         # window is small the table shrinks instead of pushing these off-screen.
-        self.logbox = tk.Text(root, height=7, wrap="word", state="disabled", font=(MONO, 9),
+        self.logbox = tk.Text(root, height=5, wrap="word", state="disabled", font=(MONO, 9),
                               background="#0b0b0c", foreground=MUTED, relief="flat",
                               borderwidth=0, padx=10, pady=8, highlightthickness=1,
                               highlightbackground=BORDER, highlightcolor=BORDER,
@@ -415,8 +494,8 @@ class App:
         self.logbox.pack(side="bottom", fill="x", padx=18, pady=(0, 18))
         ttk.Label(root, text="ACTIVITY", style="Section.TLabel",
                   padding=(18, 14, 18, 4)).pack(side="bottom", anchor="w")
-        ttk.Label(root, text="Double-click a file to lock it and open it in SolidWorks",
-                  style="Stat.TLabel", padding=(18, 0)).pack(side="bottom", anchor="w")
+        self.hint = ttk.Label(root, text=HINT, style="Stat.TLabel", padding=(18, 0))
+        self.hint.pack(side="bottom", anchor="w")
 
         bar = ttk.Frame(root, padding=(18, 12))
         bar.pack(side="bottom", fill="x")
@@ -424,7 +503,8 @@ class App:
                            command=self.start_editing)
         done = ttk.Button(bar, text="Done editing", style="Primary.TButton",
                           command=self.done_editing)
-        open_ = ttk.Button(bar, text="Open read-only", command=self.open_in_sw)
+        open_ = ttk.Button(bar, text="Open read-only", width=14, command=self.open_in_sw)
+        self.open_btn = open_
         discard = ttk.Button(bar, text="Discard changes", style="Danger.TButton",
                              command=self.discard)
         refresh = ttk.Button(bar, text="↻  Refresh", command=self.refresh)
@@ -434,6 +514,7 @@ class App:
         discard.pack(side="left")
         refresh.pack(side="right")
         self.buttons = [start, done, open_, discard, refresh]
+        self.action_buttons = [start, done, open_, discard]  # greyed out for top folders
 
         card.pack(fill="both", expand=True, padx=18)  # last: gets whatever space is left
 
@@ -459,21 +540,62 @@ class App:
         self.logbox.see("end")
         self.logbox.configure(state="disabled")
 
-    def step(self, *args):
-        """Run one git command from a worker thread; raise StepFailed on error."""
+    def try_step(self, *args):
+        """Run one git command from a worker thread and log it. Returns (code, output)."""
         self.log("$ git " + " ".join(args))
         code, out, err = git(self.repo, *args)
         text = (out + err).strip()
         if text:
             self.log(text)
+        return code, text
+
+    def step(self, *args):
+        """Like try_step, but raise StepFailed on error."""
+        code, text = self.try_step(*args)
         if code:
             raise StepFailed(text.splitlines()[-1] if text else "git %s failed" % args[0])
-        return out
+        return text
+
+    def pull_merge(self):
+        """Bring in teammates' commits WITHOUT touching your other uncommitted files.
+
+        A merge (unlike rebase/autostash) works with a dirty working folder, and
+        only refuses if an incoming commit changes a file you've also changed,
+        in which case nothing is modified and we say which files.
+        """
+        code, text = self.try_step("pull", "--no-rebase", "--no-edit", "--ff")
+        if code == 0:
+            return
+        if os.path.exists(os.path.join(self.repo, ".git", "MERGE_HEAD")):
+            git(self.repo, "merge", "--abort")  # never leave a half-done merge behind
+        files = blocking_files(text)
+        if files:
+            raise StepFailed(
+                "A teammate pushed changes to files you also have uncommitted changes to:\n\n"
+                + "\n".join("  " + f for f in files) +
+                "\n\nCheck in (Done editing) or discard your changes to those first, then try "
+                "again. Nothing was changed.")
+        raise StepFailed("Couldn't get the latest version from GitHub:\n\n" +
+                         (text.splitlines()[-1] if text else "unknown error"))
+
+    def push(self):
+        """Push; only if GitHub has newer commits, merge them in and push again."""
+        code, text = self.try_step("push")
+        if code == 0:
+            return
+        low = text.lower()
+        if "locked" in low:  # LFS pre-push hook: you changed a file someone else holds
+            raise StepFailed("GitHub refused the push because it includes files locked by "
+                             "someone else:\n\n" + text)
+        if not ("fetch first" in low or "non-fast-forward" in low or "rejected" in low):
+            raise StepFailed("Push failed:\n\n" + (text.splitlines()[-1] if text else "?"))
+        self.log("GitHub has newer commits from teammates; merging them in...")
+        self.pull_merge()
+        self.step("push")
 
     def set_busy(self, busy):
         self.busy = busy
-        for b in self.buttons:
-            b.state(["disabled"] if busy else ["!disabled"])
+        self.update_buttons()
         self.root.configure(cursor="watch" if busy else "")
         self.busy_label.configure(text="WORKING…" if busy else "")
         if busy and self.strip_pos is None:
@@ -586,19 +708,53 @@ class App:
         scroll = self.tree.yview()[0]
         self.tree.delete(*self.tree.get_children())
         self.rows_by_path = {}
+        dirs = state.get("dirs", [])
+
+        # Per-folder totals over everything inside it (for the folder's summary row)
+        totals = {d: {"you": 0, "them": 0, "changed": 0, "open": 0} for d in dirs}
+        for r in state["rows"]:
+            parts = r["path"].split("/")[:-1]
+            for i in range(1, len(parts) + 1):
+                t = totals.get("/".join(parts[:i]))
+                if t:
+                    t["you"] += r["lock"] == "you"
+                    t["them"] += r["lock"] == "them"
+                    t["changed"] += bool(r["change"])
+                    t["open"] += r["open"]
+
+        def parent_of(path):
+            parent = path.rsplit("/", 1)[0] if "/" in path else ""
+            return "" if parent in ("", HIDDEN_ROOT) else "dir:" + parent
+
+        # Folders first (sorted parent-before-child), so each parent lists its
+        # subfolders above its files.
+        for d in dirs:
+            if d == HIDDEN_ROOT:
+                continue
+            t = totals[d]
+            lock = "  ·  ".join(s for s in (
+                "%d by you" % t["you"] if t["you"] else "",
+                "%d by others" % t["them"] if t["them"] else "") if s)
+            self.tree.insert(parent_of(d), "end", iid="dir:" + d, text="  " + d.rsplit("/", 1)[-1],
+                             image=self.folder_icon, open=("dir:" + d) in self.open_dirs,
+                             tags=("folder",),
+                             values=(lock, "%d changed" % t["changed"] if t["changed"] else "",
+                                     "%d open" % t["open"] if t["open"] else ""))
         for r in state["rows"]:
             self.rows_by_path[r["path"]] = r
             dot = "●" if r["lock"] != "free" else "○"
-            self.tree.insert("", "end", iid=r["path"], text="  " + r["path"],
+            self.tree.insert(parent_of(r["path"]), "end", iid=r["path"],
+                             text="  " + r["path"].rsplit("/", 1)[-1], image=self.file_icon,
                              tags=(r["lock"],),
                              values=("%s  %s" % (dot, lock_label(r)), r["change"],
                                      "●  Open" if r["open"] else ""))
-        keep = [p for p in selected if p in self.rows_by_path]
+        keep = [p for p in selected if self.tree.exists(p)]
         if keep:
             self.tree.selection_set(keep)
         self.tree.yview_moveto(scroll)  # don't jump back to the top on refresh
+        self.update_buttons()  # lock status may have changed under the selection
 
-        if state["rows"]:
+        if state["rows"] or dirs:
             self.empty.place_forget()
         else:
             self.empty.place(relx=0.5, rely=0.5, anchor="center")
@@ -617,10 +773,55 @@ class App:
         err = state.get("lock_error")
         self.banner.configure(text=("⚠  Lock status unavailable: " + err) if err else "")
 
+    def files_under(self, iid):
+        """All file paths inside a folder row, at any depth."""
+        out = []
+        for child in self.tree.get_children(iid):
+            out.extend(self.files_under(child) if child.startswith("dir:") else [child])
+        return out
+
+    def selected_rows(self):
+        """Selected files; a selected folder counts as every file inside it."""
+        paths = []
+        for iid in self.tree.selection():
+            paths.extend(self.files_under(iid) if iid.startswith("dir:") else [iid])
+        return [self.rows_by_path[p] for p in dict.fromkeys(paths) if p in self.rows_by_path]
+
+    def protected_selected(self):
+        """Selected top-level folders (cad/parts, cad/assemblies, ...)."""
+        return [i[4:] for i in self.tree.selection()
+                if i.startswith("dir:") and is_protected_dir(i[4:])]
+
+    def update_buttons(self):
+        """Enable/disable buttons for the busy state and the current selection."""
+        protected = self.protected_selected()
+        for b in self.buttons:
+            off = self.busy or (b in self.action_buttons and protected)
+            b.state(["disabled"] if off else ["!disabled"])
+        if protected:
+            self.hint.configure(
+                text="⚠  Top-level folders (%s) can't be locked or checked in as a whole. "
+                     "Open the folder and select files or subfolders instead."
+                     % ", ".join(d.split("/")[-1] for d in protected), style="HintWarn.TLabel")
+        else:
+            self.hint.configure(text=HINT, style="Stat.TLabel")
+        # 'Open' (orange outline) when everything selected is editable by you
+        rows = self.selected_rows()
+        editable = bool(rows) and all(r["lock"] == "you" or r["change"] == "New" for r in rows)
+        self.open_btn.configure(text="Open" if editable else "Open read-only",
+                                style="Outline.TButton" if editable else "TButton")
+
     def selected(self):
-        rows = [self.rows_by_path[p] for p in self.tree.selection() if p in self.rows_by_path]
+        protected = self.protected_selected()
+        if protected:  # buttons are greyed out too; this is the backstop
+            messagebox.showwarning(
+                "Not allowed", "Top-level folders can't be locked or checked in as a whole:\n\n"
+                + "\n".join(protected) + "\n\nSelect files or subfolders inside them instead.",
+                parent=self.root)
+            return []
+        rows = self.selected_rows()
         if not rows:
-            messagebox.showinfo("Nothing selected", "Select one or more files first "
+            messagebox.showinfo("Nothing selected", "Select one or more files, or a folder "
                                 "(Ctrl+click to select several).", parent=self.root)
         return rows
 
@@ -670,7 +871,7 @@ class App:
         def work():
             for p in to_lock:  # lock first, so nobody can push between our pull and lock
                 self.step("lfs", "lock", p)
-            self.step("pull", "--ff-only")
+            self.pull_merge()
             if was_open:
                 return ("Locked. These were already open read-only, so close and reopen "
                         "them in SolidWorks:\n\n" + "\n".join(was_open))
@@ -697,10 +898,14 @@ class App:
                                  + "\n".join(still_open), parent=self.root)
             return
         changed = [r["path"] for r in rows if r["change"]]
+        # Committed earlier but never pushed (e.g. a previous Done editing failed
+        # half-way). These must reach GitHub before their lock is released.
+        unpushed = unpushed_paths(self.repo)
+        pending = [r["path"] for r in rows if r["path"] in unpushed]
         lock_first = [r["path"] for r in rows
                       if r["lock"] == "free" and r["change"] in ("Modified", "Deleted")]
         to_unlock = [r["path"] for r in rows if r["lock"] == "you"] + lock_first
-        if not changed and not to_unlock:
+        if not changed and not to_unlock and not pending:
             messagebox.showinfo("Nothing to do", "No changes and nothing locked by you.",
                                 parent=self.root)
             return
@@ -717,17 +922,21 @@ class App:
                 self.step("lfs", "lock", p)
             if changed:
                 self.step("add", "--all", "--", *changed)
-                self.step("commit", "-m", message, "--", *changed)
+                code, text = self.try_step("commit", "-m", message, "--", *changed)
+                if code and "nothing to commit" not in text:
+                    raise StepFailed(text.splitlines()[-1] if text else "git commit failed")
+            if changed or pending:
                 try:
-                    self.step("pull", "--rebase", "--autostash")
-                except StepFailed:
-                    git(self.repo, "rebase", "--abort")
-                    raise StepFailed("Couldn't merge with GitHub's latest version. Your commit "
-                                     "is saved locally; ask for help before retrying.")
-                self.step("push")
+                    self.push()
+                except StepFailed as e:
+                    # Locks are kept, and the commit is saved: clicking Done editing
+                    # again picks it up via `pending` and retries just the push.
+                    raise StepFailed(str(e) + "\n\nYour commit is saved on this computer and "
+                                     "your locks are kept. Click Done editing again to retry.")
             for p in to_unlock:
                 self.step("lfs", "unlock", p)
-            return ("Pushed and unlocked." if changed else "Unlocked (no changes).") + \
+            pushed = changed or pending
+            return ("Pushed and unlocked." if pushed else "Unlocked (no changes).") + \
                 "\n\n" + "\n".join(r["path"] for r in rows)
 
         self.run_async("Done editing", work)
@@ -743,13 +952,17 @@ class App:
         body.pack(fill="both", expand=True)
 
         ttk.Label(body, text="What did you change?", style="DlgTitle.TLabel").pack(anchor="w")
-        ttk.Label(body, text="One line, e.g. “Thicken blade toe to 9 mm”",
+        ttk.Label(body, text="Press Enter to use this, or type over it, e.g. "
+                             "“Thicken blade toe to 9 mm”",
                   style="Stat.TLabel").pack(anchor="w", pady=(2, 10))
         entry = tk.Entry(body, width=58, font=(FONT, 11), background=SURFACE, foreground=TEXT,
                          insertbackground=ORANGE, relief="flat", highlightthickness=2,
                          highlightbackground=BORDER, highlightcolor=ORANGE,
                          selectbackground=GREY, selectforeground=TEXT)
         entry.pack(fill="x", ipady=7)
+        entry.insert(0, default_commit_message(files))
+        entry.select_range(0, "end")  # typing replaces the default; Enter accepts it
+        entry.icursor("end")
 
         ttk.Label(body, text="CHECKING IN", style="Section.TLabel").pack(anchor="w",
                                                                        pady=(16, 4))
@@ -795,9 +1008,20 @@ class App:
             return
         revert = [r["path"] for r in rows if r["change"] in ("Modified", "Deleted")]
         to_unlock = [r["path"] for r in rows if r["lock"] == "you"]
+        # Keep the lock on anything with a commit GitHub doesn't have yet,
+        # otherwise a teammate could lock and edit the old version.
+        unpushed = unpushed_paths(self.repo)
+        keep_locked = [p for p in to_unlock if p in unpushed]
+        to_unlock = [p for p in to_unlock if p not in unpushed]
+        if keep_locked:
+            messagebox.showwarning(
+                "Not pushed yet", "These have a commit that hasn't reached GitHub, so they'll "
+                "stay locked:\n\n" + "\n".join(keep_locked) +
+                "\n\nUse Done editing to push them.", parent=self.root)
         if not revert and not to_unlock:
-            messagebox.showinfo("Nothing to discard", "No changes or locks on these files.",
-                                parent=self.root)
+            if not keep_locked:
+                messagebox.showinfo("Nothing to discard", "No changes or locks on these files.",
+                                    parent=self.root)
             return
         if revert and not messagebox.askyesno(
                 "Discard changes?", "This permanently throws away your changes to:\n\n"
