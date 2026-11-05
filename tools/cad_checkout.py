@@ -17,9 +17,11 @@ Run with:  python tools/cad_checkout.py         (GUI)
 """
 from __future__ import annotations
 
+import glob
 import json
 import os
 import queue
+import shutil
 import subprocess
 import sys
 import threading
@@ -28,28 +30,116 @@ from tkinter import messagebox, simpledialog, ttk
 
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # no console flashes on Windows
 AUTO_REFRESH_MS = 60_000
+GIT_DOWNLOAD = "https://git-scm.com/download/win"
 
 
 # --------------------------------------------------------------------------- git helpers
 
+def find_git():
+    """git on PATH, else the copy bundled with GitHub Desktop (it includes Git LFS)."""
+    exe = shutil.which("git")
+    if exe:
+        return exe
+    pattern = os.path.join(os.environ.get("LOCALAPPDATA", ""), "GitHubDesktop", "app-*",
+                           "resources", "app", "git", "cmd", "git.exe")
+    found = sorted(glob.glob(pattern), key=os.path.getmtime)
+    return found[-1] if found else None
+
+
+GIT = find_git()
+
+
 def git(repo, *args, input_text=None):
     """Run git and return (returncode, stdout, stderr)."""
+    if not GIT:
+        return 127, "", "git is not installed"
     try:
         p = subprocess.run(
-            ["git", *args], cwd=repo, input=input_text, capture_output=True,
+            [GIT, *args], cwd=repo, input=input_text, capture_output=True,
             text=True, encoding="utf-8", errors="replace", creationflags=NO_WINDOW,
         )
-    except FileNotFoundError:
-        return 127, "", "git is not installed or not on PATH"
+    except OSError as e:
+        return 127, "", "could not run git: %s" % e
     return p.returncode, p.stdout, p.stderr
 
 
 def find_repo():
+    """Return the repo root, or None if this script isn't inside a git repo."""
     here = os.path.dirname(os.path.abspath(__file__))
-    code, out, err = git(here, "rev-parse", "--show-toplevel")
-    if code:
-        raise SystemExit("cad_checkout must live inside the git repo:\n" + err)
-    return os.path.normpath(out.strip())
+    code, out, _ = git(here, "rev-parse", "--show-toplevel")
+    return os.path.normpath(out.strip()) if code == 0 else None
+
+
+# --------------------------------------------------------------------------- setup checks
+
+def lfs_installed(repo):
+    return git(repo, "lfs", "version")[0] == 0
+
+
+def lfs_configured(repo):
+    """LFS filters are registered with git, and this repo has the LFS hooks."""
+    _, out, _ = git(repo, "config", "--get", "filter.lfs.process")
+    if not out.strip():
+        return False
+    _, hooks, _ = git(repo, "rev-parse", "--git-path", "hooks")
+    pre_push = os.path.join(repo, hooks.strip(), "pre-push")
+    try:
+        with open(pre_push, encoding="utf-8", errors="replace") as f:
+            return "lfs" in f.read()
+    except OSError:
+        return False
+
+
+def missing_lfs_files(repo):
+    """LFS files that are still pointer stubs on disk (marked '-' by git lfs ls-files)."""
+    _, out, _ = git(repo, "lfs", "ls-files")
+    return [line.split(" - ", 1)[1] for line in out.splitlines() if " - " in line]
+
+
+def preflight(repo, ask, fix=True):
+    """Check git/LFS setup. `ask(title, msg, kind)` shows a dialog ('error' or 'yesno').
+
+    Returns True when the tool is safe to use.
+    """
+    if not GIT:
+        ask("Git not found", "Git isn't installed (or isn't on PATH).\n\nInstall Git for "
+            "Windows, which includes Git LFS:\n" + GIT_DOWNLOAD, "error")
+        return False
+    if not repo:
+        ask("Not in the repo", "cad_checkout.py must be inside the project's git folder.",
+            "error")
+        return False
+    if not lfs_installed(repo):
+        ask("Git LFS not installed",
+            "This repo stores CAD files with Git LFS, which isn't installed for:\n" + GIT +
+            "\n\nInstall Git for Windows (it includes LFS):\n" + GIT_DOWNLOAD +
+            "\nor Git LFS on its own: https://git-lfs.com\n\nThen reopen CAD Checkout.",
+            "error")
+        return False
+    if not lfs_configured(repo):
+        why = ("Git LFS is installed but not set up on this computer/repo.\n\nWithout it, "
+               "CAD files get committed outside LFS and lock checks are skipped on push.")
+        if not fix:
+            ask("Git LFS not set up", why + "\nFix: run 'git lfs install' in the repo.", "error")
+            return False
+        if not ask("Set up Git LFS?", why + "\n\nRun 'git lfs install' now? (one-time setup)",
+                   "yesno"):
+            return False
+        code, out, err = git(repo, "lfs", "install")
+        if code or not lfs_configured(repo):
+            ask("Setup failed", (out + err).strip() or "git lfs install failed", "error")
+            return False
+    stubs = missing_lfs_files(repo)
+    if stubs and fix and ask(
+            "Download CAD files?",
+            "%d file(s) are placeholders, not real files (the repo was cloned before LFS was "
+            "set up). SolidWorks will say they're corrupt.\n\nDownload them now? This may "
+            "take a minute.\n\n%s" % (len(stubs), "\n".join(stubs[:10]) +
+                                      ("\n..." if len(stubs) > 10 else "")), "yesno"):
+        code, out, err = git(repo, "lfs", "pull")
+        if code:
+            ask("Download failed", (out + err).strip(), "error")
+    return True
 
 
 def sw_lock_file(repo, path):
@@ -422,6 +512,15 @@ class App:
 def main():
     repo = find_repo()
     if "--check" in sys.argv:
+        def ask(title, msg, kind):
+            print("[%s] %s" % (title, msg))
+            return False
+        print("git:", GIT)
+        if not preflight(repo, ask, fix=False):
+            return
+        stubs = missing_lfs_files(repo)
+        if stubs:
+            print("not downloaded (pointer files):", ", ".join(stubs))
         st = load_state(repo)
         print("branch:", st["branch"], "| upstream:", st["upstream"])
         if st["lock_error"]:
@@ -431,6 +530,18 @@ def main():
                                            "OPEN" if r["open"] else ""))
         return
     root = tk.Tk()
+    root.withdraw()  # hidden until setup checks pass, so dialogs still show under pythonw
+
+    def ask(title, msg, kind):
+        if kind == "yesno":
+            return messagebox.askyesno(title, msg, parent=root)
+        messagebox.showerror(title, msg, parent=root)
+        return False
+
+    if not preflight(repo, ask):
+        root.destroy()
+        return
+    root.deiconify()
     App(root, repo)
     root.mainloop()
 
