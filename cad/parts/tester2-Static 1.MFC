@@ -1,0 +1,16 @@
+[StartTime]
+tester2-Static 1.MFC=1s
+[SolverState]
+tester2-Static 1.MFC=2
+[MainFrame]
+tester2-Static 1.MFC=MCAAAAAAAAAAAAAABAAAAAAAPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPMECAAAAAHHBAAAAAELDAAAAAKECAAAAA
+[ShowMin]
+tester2-Static 1.MFC=No
+[SolverType]
+tester2-Static 1.MFC=Linear Analysis
+[StudyType]
+tester2-Static 1.MFC=0
+[StudyName]
+tester2-Static 1.MFC=Static 1
+[Solver]
+tester2-Static 1.MFC=Iterative

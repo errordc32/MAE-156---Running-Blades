@@ -1,0 +1,16 @@
+[StartTime]
+blade-Static 1.MFC=54s
+[SolverState]
+blade-Static 1.MFC=1
+[MainFrame]
+blade-Static 1.MFC=MCAAAAAAAAAAAAAABAAAAAAAPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPMECAAAAAHHBAAAAAELDAAAAADKDAAAAA
+[ShowMin]
+blade-Static 1.MFC=No
+[SolverType]
+blade-Static 1.MFC=Linear Analysis
+[StudyType]
+blade-Static 1.MFC=0
+[StudyName]
+blade-Static 1.MFC=Static 1
+[Solver]
+blade-Static 1.MFC=Iterative
